@@ -12,60 +12,73 @@ type SendMessageActionArgs = {
 };
 
 export async function sendMessageAction({ content, messageType, receiverId }: SendMessageActionArgs) {
-	const { getUser } = getKindeServerSession();
-	const user = await getUser();
+  const { getUser } = getKindeServerSession();
+  const user = await getUser();
 
-	if (!user) return { success: false, message: "User not authenticated" };
+  if (!user) return { success: false, message: "User not authenticated" };
 
-	const senderId = user.id;
+  const senderId = user.id;
 
-	const conversationId = `conversation:${[senderId, receiverId].sort().join(":")}`;
+  const conversationId = `conversation:${[senderId, receiverId]
+    .sort()
+    .join(":")}`;
 
-	// the issue with this has been explained in the tutorial, we need to sort the ids to make sure the conversation id is always the same
-	// john, jane
-	// 123,  456
+  // the issue with this has been explained in the tutorial, we need to sort the ids to make sure the conversation id is always the same
+  // john, jane
+  // 123,  456
 
-	// john sends a message to jane
-	// senderId: 123, receiverId: 456
-	// `conversation:123:456`
+  // john sends a message to jane
+  // senderId: 123, receiverId: 456
+  // `conversation:123:456`
 
-	// jane sends a message to john
-	// senderId: 456, receiverId: 123
-	// conversation:456:123
+  // jane sends a message to john
+  // senderId: 456, receiverId: 123
+  // conversation:456:123
 
-	const conversationExists = await redis.exists(conversationId);
+  const conversationExists = await redis.exists(conversationId);
+  /*
+	This command checks if a key (conversationId) exists in the Redis database. It returns 1 if the key exists and 0 if it does not
+	*/
 
-	if (!conversationExists) {
-		await redis.hset(conversationId, {
-			participant1: senderId,
-			participant2: receiverId,
-		});
+  if (!conversationExists) {
+    await redis.hset(conversationId, {
+      participant1: senderId,
+      participant2: receiverId,
+    });
 
-		await redis.sadd(`user:${senderId}:conversations`, conversationId);
-		await redis.sadd(`user:${receiverId}:conversations`, conversationId);
-	}
+    await redis.sadd(`user:${senderId}:conversations`, conversationId);
+    await redis.sadd(`user:${receiverId}:conversations`, conversationId);
+  }
 
-	// Generate a unique message id
-	const messageId = `message:${Date.now()}:${Math.random().toString(36).substring(2, 9)}`;
-	const timestamp = Date.now();
+  // Generate a unique message id
+  const messageId = `message:${Date.now()}:${Math.random()
+    .toString(36)
+    .substring(2, 9)}`;
+  const timestamp = Date.now();
 
-	// Create the message hash
-	await redis.hset(messageId, {
-		senderId,
-		content,
-		timestamp,
-		messageType,
-	});
+  // Create the message hash
+  await redis.hset(messageId, {
+    senderId,
+    content,
+    timestamp,
+    messageType,
+  });
 
-	await redis.zadd(`${conversationId}:messages`, { score: timestamp, member: JSON.stringify(messageId) });
+  await redis.zadd(`${conversationId}:messages`, {
+    score: timestamp,
+    member: JSON.stringify(messageId),
+  });
 
-	const channelName = `${senderId}__${receiverId}`.split("__").sort().join("__");
+  const channelName = `${senderId}__${receiverId}`
+    .split("__")
+    .sort()
+    .join("__");
 
-	await pusherServer?.trigger(channelName, "newMessage", {
-		message: { senderId, content, timestamp, messageType },
-	});
+  await pusherServer?.trigger(channelName, "newMessage", {
+    message: { senderId, content, timestamp, messageType },
+  });
 
-	return { success: true, conversationId, messageId };
+  return { success: true, conversationId, messageId };
 }
 
 export async function getMessages(selectedUserId: string, currentUserId: string) {
